@@ -1,6 +1,8 @@
+#!/usr/bin/env python
 
 import logging
 import os
+import re
 from subprocess import Popen, PIPE
 from threading import Thread, Lock, Event
 from time import sleep
