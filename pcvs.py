@@ -227,8 +227,7 @@ class Repository(object):
         if check_raise and proc.returncode:
             raise CVSError(subcommand, proc, cmd)
 
-    @staticmethod
-    def _parse_cvs_line(line):
+    def _parse_cvs_line(self, line):
         match = self.CVS_LINE_PARSE_RE.match(line)
         if match:
             return match.groups()
