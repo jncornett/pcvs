@@ -57,8 +57,6 @@ class TestTimeoutProcessWrapper(TestCase):
 class TestSubprocessHelper(TestCase):
     def setUp(self):
         self.def_options = {
-            "env": None,
-            "cwd": None,
             "stdout": subprocess.PIPE,
             "stderr": subprocess.PIPE
             }
@@ -66,8 +64,8 @@ class TestSubprocessHelper(TestCase):
     def test_bake(self):
         sh = pcvs.SubprocessHelper("my_binary")
         baked = sh.bake("one", two="four")
-        self.assertEquals(baked.args, ("one",))
-        self.assertEquals(baked.kwargs, {"two": "four"})
+        self.assertEquals(baked.argset[-1][0], ("one",))
+        self.assertEquals(baked.argset[-1][1], {"two": "four"})
 
     def test__resolve_cmdline(self):
         sh = pcvs.SubprocessHelper("my_binary")
@@ -126,3 +124,65 @@ class TestSubprocessHelper(TestCase):
 
         self.assertEqual(p._timeout, 0.05)
         p.wait()
+
+    def test_context(self):
+        def test_invalid_timeout():
+            with pcvs.SubprocessHelper("echo") as proc:
+                pass
+
+        self.assertRaises(ValueError, test_invalid_timeout)
+
+        def test_valid_timeout():
+            sh = pcvs.SubprocessHelper("echo", __timeout=0.05)
+            with sh as proc:
+                return proc
+
+        proc = test_valid_timeout()
+        self.assertFalse(proc.timed_out)
+
+
+# Fixtures for TestRepository
+class MockProcess(object):
+    def __init__(self, subprocess_helper):
+        self.parent = subprocess_helper
+
+class PatchedSubprocessHelper(pcvs.SubprocessHelper):
+    def __init__(self, *args, **kwargs):
+        super(PatchedSubprocessHelper, self).__init__(*args, **kwargs)
+        self.calls = []
+
+    def __call__(self, *args, **kwargs):
+        self.calls.append(self._resolve_cmdline(args, kwargs))
+        self.child = MockProcess(self)
+        return self.child
+
+    def __exit__(self, *args):
+        pass
+
+
+class TestRepository(TestCase):
+    def setUp(self):
+        self.patch_SubprocessHelper()
+
+    def tearDown(self):
+        self.unpatch_SubprocessHelper()
+
+    def patch_SubprocessHelper(self):
+        self.old_SubprocessHelper = pcvs.SubprocessHelper
+        pcvs.SubprocessHelper = PatchedSubprocessHelper
+
+    def unpatch_SubprocessHelper(self):
+        if hasattr(self, "old_SubprocessHelper"):
+            pcvs.SubprocessHelper = self.old_SubprocessHelper
+
+    def test_init(self):
+        # Mostly just test if SubprocessHelper is being patched correctly for the rest of the testing
+        repo = pcvs.Repository("/tmp/foo", "foo/bar")
+        self.assertIsInstance(repo.cmd, PatchedSubprocessHelper)
+
+        timeout, options, cmdline = repo.cmd._resolve_cmdline((), {})
+        self.assertEqual(timeout, 10)
+        self.assertTrue(options.get("env", {}))
+        self.assertDictContainsSubset({"cwd": "/tmp/foo", "stderr": -1, "stdout": -1}, options)
+        self.assertEquals(cmdline, ["cvs", "-q"])
+        
