@@ -175,7 +175,6 @@ Subprocess Error:
 class CVSError(Exception):
     
     MESSAGE = "CVS {} failed with code {}"
-    DEBUG = CVS_ERROR_DEBUG_LOG
 
     def __init__(self, subcommand, proc, cmd):
         msg = self.MESSAGE.format(subcommand, proc.returncode)
@@ -186,12 +185,9 @@ class CVSError(Exception):
             "pid": proc.pid,
             "cwd": cmd.get_cwd(),
             "env": pluck(cmd.get_env(), "CVSROOT", "CVS_RSH"),
-            "stdout": cmd.stdout.read(),
-            "stderr": cmd.stderr.read()
+            "stdout": proc.stdout.read(),
+            "stderr": proc.stderr.read()
         }
-
-        logger.error(msg)
-        logger.debug(self.DEBUG.format(**self.data))
 
 HEAD = None
 
