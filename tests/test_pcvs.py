@@ -1,188 +1,38 @@
 from unittest import TestCase
-import subprocess
-import time
+import contextlib
+import logging
 
-import pcvs
+from pcvs import Repo, CVSError
+from shellwrap import ProcessWrapper, ProcessWrapperWithTimeout, \
+        SubprocessHelper
 
-class TestTimeoutProcessWrapper(TestCase):
-    def setUp(self):
-        self.a_long_time = 0.1
-        self.a_short_time = 0.05
-        self.stdout_lines = ["One\n", "Two\n", "Three\n"]
-        self.long_sleep_cmdline = [
-                "sleep", str(self.a_long_time)]
-        self.short_sleep_cmdline = [
-                "sleep", str(self.a_short_time)]
-        self.stdout_test_cmdline = [
-                "echo", "".join(self.stdout_lines).rstrip()]
+logger = logging.getLogger("test")
 
-    def test_both(self):
-        p = subprocess.Popen(self.stdout_test_cmdline,
-                stdout=subprocess.PIPE)
-        tpw = pcvs.TimeoutProcessWrapper(p,
-                self.a_short_time, self.stdout_test_cmdline)
-        tpw.wait() # Make sure the process completes
-        self.assertEquals(tpw.cmdline, self.stdout_test_cmdline)
-
-        # This test depends on threading
-        self.assertEquals(list(tpw), self.stdout_lines)
-
-    def test_with_timeout(self):
-        cmdline = self.long_sleep_cmdline
-        timeout = self.a_short_time
-
-        p = subprocess.Popen(cmdline)
-        tpw = pcvs.TimeoutProcessWrapper(p, timeout, cmdline)
-        self.assertFalse(tpw.timed_out)
-        tpw.wait()
-
-        # These 2 asserts test threading
-        self.assertTrue(tpw.timed_out)
-        self.assertTrue(tpw.returncode < 0,
-                "If the process timed out and was terminated, "
-                "expect a negative returncode value")
-
-    def test_without_timeout(self):
-        cmdline = self.short_sleep_cmdline
-        timeout = self.a_long_time
-
-        p = subprocess.Popen(cmdline)
-        tpw = pcvs.TimeoutProcessWrapper(p, timeout, cmdline)
-        tpw.wait()
-
-        # This 2 asserts test threading
-        self.assertFalse(tpw.timed_out)
-        self.assertEquals(tpw.returncode, 0)
-
-class TestSubprocessHelper(TestCase):
-    def setUp(self):
-        self.def_options = {
-            "stdout": subprocess.PIPE,
-            "stderr": subprocess.PIPE
-            }
-
-    def test_bake(self):
-        sh = pcvs.SubprocessHelper("my_binary")
-        baked = sh.bake("one", two="four")
-        self.assertEquals(baked.argset[-1][0], ("one",))
-        self.assertEquals(baked.argset[-1][1], {"two": "four"})
-
-    def test__resolve_cmdline(self):
-        sh = pcvs.SubprocessHelper("my_binary")
-        (timeout, 
-         options, 
-         cmdline) = sh._resolve_cmdline(
-                 ("one",), {"two": "four"})
-
-        self.assertIsNone(timeout)
-        self.assertEquals(options, self.def_options)
-        self.assertEquals(cmdline, 
-                ["my_binary", "--two", "four", "one"],
-                "Keyword arguments should appear before "
-                "positional arguments by default")
-        
-        (_, options, cmdline) = sh._resolve_cmdline(
-                (), {"__env": "foo"})
-
-        self.assertIn("env", options)
-        self.assertEqual(options["env"], "foo")
-        self.assertEquals(cmdline, ["my_binary"])
-
-        (_, _, cmdline) = sh._resolve_cmdline(
-                (), {"__f": True, "b": 4, "c": False})
-        self.assertEqual(len(cmdline), 4)
-        self.assertEqual(cmdline[0], "my_binary")
-        self.assertIn("--f", cmdline)
-        self.assertIn("-b", cmdline)
-        self.assertEquals(cmdline[cmdline.index("-b"):],
-                ["-b", "4"])
-
-        (timeout, options, cmdline) = sh._resolve_cmdline(
-                (), {"__timeout": 10})
-
-        self.assertEqual(timeout, 10)
-        self.assertEquals(options, self.def_options)
-        self.assertEquals(cmdline, ["my_binary"])
+@contextlib.contextmanager
+def patch(obj, attr, patch):
+    old_attr = getattr(obj, attr)
+    setattr(obj, attr, patch)
+    yield
+    setattr(obj, attr, old_attr)
 
 
-    def test___call__(self):
-        sh = pcvs.SubprocessHelper("echo", "one")
-        p = sh("two")
-        p.wait()
-        self.assertEquals(p.cmdline, 
-                ["echo", "one", "two"])
-        self.assertEquals(list(p.stdout), ["one two\n"])
+class TestRepo(TestCase):
+    def test_get_cvs_filename(self):
+        r = Repo("foo", "bar", "buzz")
+        self.assertEqual(r._get_cvs_filename("entries"), "foo/CVS/Entries")
 
-    def test_timeout(self):
-        p = pcvs.SubprocessHelper("echo", __timeout=0.05)()
-        self.assertIsInstance(p, pcvs.TimeoutProcessWrapper)
+    def test_handle_process(self):
+        r = Repo("a")
+        sh = SubprocessHelper.create("sleep")
 
-        # These 2 asserts test threading
-        self.assertTrue(p.is_alive())
-        time.sleep(0.1)
-        self.assertFalse(p.is_alive())
+        p1 = sh.call("0.05")
+        rv = r._handle_process(p1, "foo")
+        self.assertEquals(rv, {})
 
-        self.assertEqual(p._timeout, 0.05)
-        p.wait()
+        p2 = sh.call("0.1", _timeout=0.05)
+        self.assertRaises(CVSError, r._handle_process, p2, "foo")
 
-    def test_context(self):
-        def test_invalid_timeout():
-            with pcvs.SubprocessHelper("echo") as proc:
-                pass
+        sh2 = SubprocessHelper.create("ls")
+        p3 = sh2.call("doesntexistfoo")
+        self.assertRaises(CVSError, r._handle_process, p3, "foo")
 
-        self.assertRaises(ValueError, test_invalid_timeout)
-
-        def test_valid_timeout():
-            sh = pcvs.SubprocessHelper("echo", __timeout=0.05)
-            with sh as proc:
-                return proc
-
-        proc = test_valid_timeout()
-        self.assertFalse(proc.timed_out)
-
-
-# Fixtures for TestRepository
-class MockProcess(object):
-    def __init__(self, subprocess_helper):
-        self.parent = subprocess_helper
-
-class PatchedSubprocessHelper(pcvs.SubprocessHelper):
-    def __init__(self, *args, **kwargs):
-        super(PatchedSubprocessHelper, self).__init__(*args, **kwargs)
-        self.calls = []
-
-    def __call__(self, *args, **kwargs):
-        self.calls.append(self._resolve_cmdline(args, kwargs))
-        self.child = MockProcess(self)
-        return self.child
-
-    def __exit__(self, *args):
-        pass
-
-
-class TestRepository(TestCase):
-    def setUp(self):
-        self.patch_SubprocessHelper()
-
-    def tearDown(self):
-        self.unpatch_SubprocessHelper()
-
-    def patch_SubprocessHelper(self):
-        self.old_SubprocessHelper = pcvs.SubprocessHelper
-        pcvs.SubprocessHelper = PatchedSubprocessHelper
-
-    def unpatch_SubprocessHelper(self):
-        if hasattr(self, "old_SubprocessHelper"):
-            pcvs.SubprocessHelper = self.old_SubprocessHelper
-
-    def test_init(self):
-        # Mostly just test if SubprocessHelper is being patched correctly for the rest of the testing
-        repo = pcvs.Repository("/tmp/foo", "foo/bar")
-        self.assertIsInstance(repo.cmd, PatchedSubprocessHelper)
-
-        timeout, options, cmdline = repo.cmd._resolve_cmdline((), {})
-        self.assertEqual(timeout, 10)
-        self.assertTrue(options.get("env", {}))
-        self.assertDictContainsSubset({"cwd": "/tmp/foo", "stderr": -1, "stdout": -1}, options)
-        self.assertEquals(cmdline, ["cvs", "-q"])
-        

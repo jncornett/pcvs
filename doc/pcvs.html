@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+
+<html>
+<head>
+  <title>pcvs.py</title>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8">
+  <meta name="viewport" content="width=device-width, target-densitydpi=160dpi, initial-scale=1.0; maximum-scale=1.0; user-scalable=0;">
+  <link rel="stylesheet" media="all" href="docco.css" />
+</head>
+<body>
+  <div id="container">
+    <div id="background"></div>
+    
+    <ul class="sections">
+        
+          <li id="title">
+              <div class="annotation">
+                  <h1>pcvs.py</h1>
+              </div>
+          </li>
+        
+        
+        
+        <li id="section-1">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-1">&#182;</a>
+              </div>
+              
+            </div>
+            
+            <div class="content"><div class='highlight'><pre><span class="hljs-comment">#!/usr/bin/env python3</span>
+<span class="hljs-keyword">import</span> os
+<span class="hljs-keyword">import</span> re
+<span class="hljs-keyword">from</span> collections <span class="hljs-keyword">import</span> defaultdict
+<span class="hljs-keyword">from</span> shellwrap <span class="hljs-keyword">import</span> SubprocessHelper, ProcessError</pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-2">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-2">&#182;</a>
+              </div>
+              <h3 id="subset">subset</h3>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre><span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">subset</span><span class="hljs-params">(d, *keys)</span>:</span>
+    <span class="hljs-keyword">return</span> {k: d[k] <span class="hljs-keyword">for</span> k <span class="hljs-keyword">in</span> keys <span class="hljs-keyword">if</span> k <span class="hljs-keyword">in</span> d}</pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-3">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-3">&#182;</a>
+              </div>
+              <h3 id="cvs-error">CVS Error</h3>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre><span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">CVSError</span><span class="hljs-params">(Exception)</span>:</span>
+
+    INVALID_REPO_MSG = <span class="hljs-string">"Not a valid CVS Repository: {why}"</span>
+    PERMISSIONS_MSG = <span class="hljs-string">"Invalid permissions: {why}"</span>
+    TIMEOUT_MSG = <span class="hljs-string">"CVS {command} timed out: {timeout}"</span>
+    CVS_ERROR_MSG = <span class="hljs-string">"CVS {command} exited with return code {code}: {stderr}"</span>
+
+    <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">__init__</span><span class="hljs-params">(self, msg, **kwargs)</span>:</span>
+        super(CVSError, self).__init__(msg)
+        self.__dict__.update(kwargs)</pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-4">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-4">&#182;</a>
+              </div>
+              <h3 id="repo">Repo</h3>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre><span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">Repo</span><span class="hljs-params">(object)</span>:</span>
+
+    CVS_STDOUT_RE = re.compile(<span class="hljs-string">r"([AUPMC?])\s+(.*?)\s*"</span>)
+
+    <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">__init__</span><span class="hljs-params">(self, path, module=None, revision=None,
+                 binary=<span class="hljs-string">"cvs"</span>, env=None, timeout=None)</span>:</span>
+        self.root = path
+        self._module = module
+        self._revision = revision
+        self._cvs = SubprocessHelper.create(
+                binary,
+                q=<span class="hljs-keyword">True</span>,
+                _env = env <span class="hljs-keyword">or</span> subset(os.environ, <span class="hljs-string">"CVSROOT"</span>, <span class="hljs-string">"CVS_RSH"</span>),
+                _timeout = timeout)
+
+
+    <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">_get_cvs_filename</span><span class="hljs-params">(self, name)</span>:</span>
+        <span class="hljs-keyword">return</span> os.path.join(self.root, <span class="hljs-string">"CVS"</span>, name.capitalize())
+
+    
+    <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">_get_data</span><span class="hljs-params">(self, name)</span>:</span>
+        path = self._get_cvs_filename(name)
+        <span class="hljs-keyword">try</span>:
+            <span class="hljs-keyword">with</span> open(path, <span class="hljs-string">"rb"</span>) <span class="hljs-keyword">as</span> f:
+                <span class="hljs-keyword">return</span> f.read().strip()
+        <span class="hljs-keyword">except</span> OSError <span class="hljs-keyword">as</span> e:
+            <span class="hljs-keyword">if</span> isinstance(e, FileNotFoundError):
+                msg = CVSError.INVALID_REPO_MSG.format(
+                        why=<span class="hljs-string">"Data file not found"</span>)
+            <span class="hljs-keyword">elif</span> isinstance(e, IsADirectoryError):
+                msg = CVSError.INVALID_REPO_MSG.format(
+                        why=<span class="hljs-string">"Path is a directory"</span>)
+            <span class="hljs-keyword">elif</span> isinstance(e, PermissionError):
+                msg = CVSError.PERMISSIONS_MSG.format(
+                        why=<span class="hljs-string">"Can't access path"</span>)
+            <span class="hljs-keyword">else</span>:
+                <span class="hljs-keyword">raise</span> e
+
+            <span class="hljs-keyword">raise</span> CVSError(msg, path=path)
+
+
+    <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">_stat_file</span><span class="hljs-params">(self, name)</span>:</span>
+        path = self._get_cvs_filename(name)
+        <span class="hljs-keyword">try</span>:
+            <span class="hljs-keyword">return</span> os.stat(path)
+        <span class="hljs-keyword">except</span> FileNotFoundError:
+            <span class="hljs-keyword">raise</span> CVSError(
+                    CVSError.INVALID_REPO_MSG.format(
+                        why=<span class="hljs-string">"Data file not found"</span>),
+                    path=path)
+
+
+    <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">_parse_cvs_out</span><span class="hljs-params">(self, f)</span>:</span>
+        changes = defaultdict(list)
+        <span class="hljs-keyword">for</span> line <span class="hljs-keyword">in</span> f:
+            match = self.CVS_STDOUT_RE.match(line)
+            <span class="hljs-keyword">if</span> match:
+                action, filename = match.groups()
+                changes[action].append(filename)
+
+        <span class="hljs-keyword">return</span> dict(changes)
+
+
+    <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">_include_revision</span><span class="hljs-params">(self, d=None)</span>:</span>
+        <span class="hljs-keyword">if</span> d <span class="hljs-keyword">is</span> <span class="hljs-keyword">None</span>:
+            d = {}
+
+        revision = self.revision
+        <span class="hljs-keyword">if</span> revision:
+            d[<span class="hljs-string">"r"</span>] = revision
+
+        <span class="hljs-keyword">return</span> d
+
+
+    <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">_handle_process</span><span class="hljs-params">(self, proc, command)</span>:</span>
+        <span class="hljs-keyword">try</span>:
+            proc.check()
+            <span class="hljs-keyword">return</span> self._parse_cvs_out(proc.stdout)
+        <span class="hljs-keyword">except</span> ProcessError <span class="hljs-keyword">as</span> e:
+            <span class="hljs-keyword">if</span> e.data.get(<span class="hljs-string">"timed_out"</span>, <span class="hljs-keyword">False</span>):
+                msg = CVSError.TIMEOUT_MSG.format(
+                        command=command,
+                        timeout=e.data[<span class="hljs-string">"timeout"</span>])
+            <span class="hljs-keyword">else</span>:
+                msg = CVSError.CVS_ERROR_MSG.format(
+                        command=command,
+                        code=e.data[<span class="hljs-string">"returncode"</span>],
+                        stderr=e.data[<span class="hljs-string">"stderr"</span>])
+
+            <span class="hljs-keyword">raise</span> CVSError(msg, data=e.data)</pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-5">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-5">&#182;</a>
+              </div>
+              <h4 id="module">module</h4>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre>    <span class="hljs-decorator">@property</span>
+    <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">module</span><span class="hljs-params">(self)</span>:</span>
+        <span class="hljs-keyword">return</span> self._module <span class="hljs-keyword">or</span> self._get_data(<span class="hljs-string">"repository"</span>)</pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-6">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-6">&#182;</a>
+              </div>
+              <h4 id="revision">revision</h4>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre>    <span class="hljs-decorator">@property</span>
+    <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">revision</span><span class="hljs-params">(self)</span>:</span>
+        <span class="hljs-keyword">return</span> self._revision <span class="hljs-keyword">or</span> self._get_data(<span class="hljs-string">"tag"</span>)[<span class="hljs-number">1</span>:]</pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-7">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-7">&#182;</a>
+              </div>
+              <h4 id="last_update">last_update</h4>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre>    <span class="hljs-decorator">@property</span>
+    <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">last_update</span><span class="hljs-params">(self)</span>:</span>
+        <span class="hljs-keyword">return</span> self._stat_file(<span class="hljs-string">"entries"</span>).st_atime</pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-8">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-8">&#182;</a>
+              </div>
+              <h4 id="requires_update">requires_update</h4>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre>    <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">requires_update</span><span class="hljs-params">(self, interval)</span>:</span>
+        <span class="hljs-keyword">return</span> self.last_update + interval &lt; time.time()</pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-9">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-9">&#182;</a>
+              </div>
+              <h3 id="checkout">checkout</h3>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre>    <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">checkout</span><span class="hljs-params">(self)</span>:</span>
+        cwd, d = os.path.split(self.root)
+        params = self._include_revision({<span class="hljs-string">"d"</span>: d})
+        checkout = self._cvs.subcommand(<span class="hljs-string">"checkout"</span>, self.module, **params)
+        <span class="hljs-keyword">return</span> self._handle_process(checkout.call(_cwd=cwd), <span class="hljs-string">"checkout"</span>)</pre></div></div>
+            
+        </li>
+        
+        
+        <li id="section-10">
+            <div class="annotation">
+              
+              <div class="pilwrap ">
+                <a class="pilcrow" href="#section-10">&#182;</a>
+              </div>
+              <h3 id="update">update</h3>
+
+            </div>
+            
+            <div class="content"><div class='highlight'><pre>    <span class="hljs-function"><span class="hljs-keyword">def</span> <span class="hljs-title">update</span><span class="hljs-params">(self, clear=True)</span>:</span>
+        params = self._include_revision({<span class="hljs-string">"C"</span>: clear})
+        update = self._cvs.subcommand(<span class="hljs-string">"update"</span>, **params)
+        <span class="hljs-keyword">return</span> self._handle_process(checkout.call(_cwd=cwd), <span class="hljs-string">"update"</span>)</pre></div></div>
+            
+        </li>
+        
+    </ul>
+  </div>
+</body>
+</html>

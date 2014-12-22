@@ -1,2 +1,2 @@
 #!/usr/bin/env bash
-docco -o doc *.py
+docco -o doc pcvs.py
