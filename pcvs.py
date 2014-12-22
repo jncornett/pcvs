@@ -9,10 +9,12 @@ from time import sleep
 
 logger = logging.getLogger(__name__)
 
+
 # ### pluck
 # Retrieve the selected keys from dictionary `d`
 def pluck(d, *keys):
     return {key: d[key] for key in keys if key in d}
+
 
 # ### TimeoutProcessWrapper
 class TimeoutProcessWrapper(Thread):
@@ -51,7 +53,7 @@ class TimeoutProcessWrapper(Thread):
 
     def run(self):
         sleep(self.timeout)
-        if self.proc.poll() == None:
+        if self.proc.poll() is None:
             self.proc.terminate()
             self._timeout_event.set()
 
@@ -60,7 +62,7 @@ class TimeoutProcessWrapper(Thread):
 
 
 class SubprocessHelper(object):
-    
+
     DEFAULT_OPTIONS = {
         "stderr": PIPE,
         "stdout": PIPE
@@ -75,7 +77,7 @@ class SubprocessHelper(object):
         proc = Popen(cmdline, **options)
         if timeout:
             return TimeoutProcessWrapper(proc, timeout, cmdline)
-        
+
         proc.cmdline = cmdline
         return proc
 
@@ -96,7 +98,8 @@ class SubprocessHelper(object):
 
     def _resolve_cmdline(self, args, kwargs):
         top_args, top_kwargs = self.argset[-1]
-        argset = self.argset[:-1] + [(top_args + args, dict(top_kwargs, **kwargs))]
+        argset = (self.argset[:-1] +
+                  [(top_args + args, dict(top_kwargs, **kwargs))])
         options = dict(self.DEFAULT_OPTIONS)
         timeout = None
 
@@ -116,8 +119,6 @@ class SubprocessHelper(object):
             _cwd = kwargs.pop("__cwd", None)
             if _cwd:
                 options["cwd"] = _cwd
-
-            _timeout = kwargs.pop("__timeout", None)
 
             for key, value in _kwargs.items():
                 if value:
@@ -141,10 +142,10 @@ class SubprocessHelper(object):
     def bake(self, *args, **kwargs):
         top_args, top_kwargs = self.argset[-1]
         instance = self.__class__(
-                self.binary,
-                *(top_args + args),
-                **(dict(top_kwargs, **kwargs))
-                )
+            self.binary,
+            *(top_args + args),
+            **(dict(top_kwargs, **kwargs))
+            )
 
         instance.argset = self.argset[:-1] + instance.argset
         return instance
@@ -172,8 +173,9 @@ Subprocess Error:
     STDERR: {stderr}\
 """
 
+
 class CVSError(Exception):
-    
+
     MESSAGE = "CVS {} failed with code {}"
 
     def __init__(self, subcommand, proc, cmd):
@@ -191,27 +193,33 @@ class CVSError(Exception):
 
 HEAD = None
 
-### Repository
+
+# ## Repository
 class Repository(object):
 
     CVS_LINE_PARSE_RE = re.compile(r"([UARMC?])\s+(.*)")
 
     # - `local_path` is the local root path of the CVS repository
     # - `module` is the remote module name of the CVS repository
-    # - `env` (optional) as a dictionary containing (additional) environment variables to use
-    #     (e.g. `CVSROOT` and `CVS_RSH`)
-    # - `cvs_binary` (default: `"cvs"`) is the name of the binary to use for the CVS command
-    # - `timeout` (default: `10`) is the duration before the CVS command is terminated
+    # - `env` (optional) as a dictionary containing (additional) environment
+    #     variables to use (e.g. `CVSROOT` and `CVS_RSH`)
+    # - `cvs_binary` (default: `"cvs"`) is the name of the binary to use for
+    #     the CVS command
+    # - `timeout` (default: `10`) is the duration before the CVS command is
+    #     terminated
     def __init__(self, local_path, module, revision=HEAD,
-            env=None, cvs_binary="cvs", timeout=10):
+                 env=None, cvs_binary="cvs", timeout=10):
         self.root = os.path.abspath(local_path)
         self.module = module
         self.revision = revision
         self.env = env or os.environ
-        self.cmd = SubprocessHelper(cvs_binary, q=True, 
-                __timeout=timeout, __cwd=self.root, __env=self.env)
+        self.cmd = SubprocessHelper(cvs_binary, q=True,
+                                    __timeout=timeout,
+                                    __cwd=self.root,
+                                    __env=self.env)
 
-    def _run_cmd(self, subcommand, iter_lines=False, check_raise=False, *args, **kwargs):
+    def _run_cmd(self, subcommand, iter_lines=False, check_raise=False,
+                 *args, **kwargs):
         cmd = self.cmd.bake(subcommand).after(*args, **kwargs)
         with cmd as proc:
             if iter_lines:
@@ -232,16 +240,14 @@ class Repository(object):
     def checkout(self):
         cwd, base = os.path.split(self.root)
         return self._run_cmd("checkout", True, True,
-                self.module, d=base, __cwd=cwd, r=self.revision)
+                             self.module, d=base, __cwd=cwd, r=self.revision)
 
     # ### update
     def update(self, clear=False):
         return self._run_cmd("update", True, True,
-                A=True, C=clear, r=self.revision)
+                             A=True, C=clear, r=self.revision)
 
     # ### status
     def status(self):
         return self._run_cmd("update", True, True,
-                A=True, n=True, r= self.revision)
-
-
+                             A=True, n=True, r=self.revision)
